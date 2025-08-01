@@ -524,18 +524,42 @@ def create_result_sheet_view(request):
         student_name = request.POST.get('student_name')
         subjects_data = []
 
-        # Collect all subject data from the dynamically added form fields
-        for key in request.POST:
-            if key.startswith('subject_name_'):
-                index = key.split('_')[-1]
-                subjects_data.append({
-                    'name': request.POST.get(f'subject_name_{index}'),
-                    'mark': float(request.POST.get(f'mark_{index}')),
-                    'credits': int(request.POST.get(f'credits_{index}')),
-                    'semester': request.POST.get(f'semester_{index}')
-                })
+        # Find all keys starting with 'subject_name_' to get the count
+        # This is robust for dynamically added fields
+        subject_indices = sorted([int(key.split('_')[-1]) for key in request.POST if key.startswith('subject_name_')])
 
-        # Create a new student entry in the database
+        for index in subject_indices:
+            subject_name = request.POST.get(f'subject_name_{index}')
+            mark_str = request.POST.get(f'mark_{index}')
+            credits_str = request.POST.get(f'credits_{index}')
+            semester = request.POST.get(f'semester_{index}')
+
+            # Validate and convert input data, handling potential errors
+            try:
+                mark = float(mark_str) if mark_str else 0.0
+                credits = int(credits_str) if credits_str else 0
+                
+                # Ensure mark and credits are within a valid range if necessary
+                if mark < 0 or mark > 100:
+                    mark = 0.0
+                if credits < 0:
+                    credits = 0
+
+                subjects_data.append({
+                    'name': subject_name,
+                    'mark': mark,
+                    'credits': credits,
+                    'semester': semester
+                })
+            except (ValueError, TypeError):
+                # If mark or credits are not valid numbers, skip this subject
+                continue
+
+        # Handle case where student name is missing or no valid subject data is provided
+        if not student_name or not subjects_data:
+            # You might want to display an error message to the user here
+            return redirect('create_result_sheet')
+
         student = Student.objects.create(name=student_name)
         total_gpa_points = 0
         total_credits = 0
@@ -544,7 +568,7 @@ def create_result_sheet_view(request):
         for sub in subjects_data:
             subject_gpa = get_gpa_from_mark(sub['mark'])
             letter_grade = get_letter_grade(sub['mark'])
-
+            
             Subject.objects.create(
                 student=student,
                 name=sub['name'],
@@ -554,14 +578,17 @@ def create_result_sheet_view(request):
                 subject_gpa=subject_gpa,
                 grade=letter_grade
             )
-            total_gpa_points += subject_gpa * sub['credits']
-            total_credits += sub['credits']
+
+            if sub['credits'] > 0:
+                total_gpa_points += subject_gpa * sub['credits']
+                total_credits += sub['credits']
 
         # Calculate and update the student's overall GPA
         if total_credits > 0:
             student.cumulative_gpa = total_gpa_points / total_credits
         else:
             student.cumulative_gpa = 0.0
+        
         student.num_subjects = len(subjects_data)
         student.save()
 
@@ -576,6 +603,22 @@ def show_result(request):
     # Fetch all students from the database, ordered by the most recent entry
     students = Student.objects.all().order_by('-entry_date')
     return render(request, 'home/show_result.html', {'students': students})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
